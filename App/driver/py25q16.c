@@ -41,8 +41,9 @@
 static uint32_t SectorCacheAddr = 0x1000000;
 #ifdef ENABLE_FEAT_F4HWN_MULTIBOOT_OVERLAY
 // The multiboot restore-only RAM stub is copied over this cache immediately
-// before it erases internal flash; a reset always follows. Any deferred write
-// is flushed first (PY25Q16_InvalidateCache), so no pending data is lost.
+// before it erases internal flash; a reset always follows. A pending deferred
+// write is flushed before the selector starts (BOOT_ProcessMode), because the
+// restore path itself runs with IRQs masked and cannot flush.
 static uint8_t SectorCache[SECTOR_SIZE]
     __attribute__((section(".bss.mb_workspace"), aligned(4), used));
 #else

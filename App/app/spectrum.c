@@ -68,8 +68,23 @@ State currentState = SPECTRUM, previousState = SPECTRUM;
 PeakInfo peak;
 ScanInfo scanInfo;
 static KeyboardState kbd = {KEY_INVALID, KEY_INVALID, 0};
-static bool menuKeyPendingShort = false;
-static bool menuKeyLongHandled = false;
+
+// Long-press keys in SPECTRUM share one contract: a short press acts on
+// release, a hold (counter==16) fires at most one action. Without it a held
+// key re-fires through the auto-repeat path every kbd.counter cycle: SIDE2
+// toggled the backlight on and off (flicker), SIDE1 blacklisted repeatedly.
+// Per-key flags so the keys don't clobber each other's pending/handled state.
+enum { LP_MENU = 0, LP_SIDE1, LP_SIDE2, LP_COUNT };
+static const uint8_t lpKeys[LP_COUNT] = { KEY_MENU, KEY_SIDE1, KEY_SIDE2 };
+static struct { bool shortPending; bool longHandled; } lpState[LP_COUNT];
+
+static int LongPressIndex(uint8_t key)
+{
+    for (int i = 0; i < LP_COUNT; i++)
+        if (lpKeys[i] == key)
+            return i;
+    return -1;
+}
 
 #ifdef ENABLE_SCAN_RANGES
 static uint16_t blacklistFreqs[15];
@@ -688,8 +703,13 @@ static void InitScanPosition()
         uint16_t steps = scanInfo.measurementsCount;
         if (steps < 16) steps = 16;
         if (steps > 128) steps = 128;
-        // Target: ~320ms baseline at 128 steps, scale down to ~160ms at 16 steps
-        uint8_t interval = (uint8_t)(WATERFALL_ROW_10MS_DEFAULT * 128 / steps);
+        // Target: ~320ms baseline at 128 steps, scale down to ~160ms at 16 steps.
+        // Linear map of [16, 128] steps onto [DEFAULT/2, DEFAULT]. The previous
+        // DEFAULT * 128 / steps was inverted (32 and 64 steps got 640 ms, the
+        // slowest rate) and at 16 steps produced 256, which truncated to 0 in
+        // uint8_t and reached 160 ms only through the lower clamp below.
+        uint8_t interval = (uint8_t)(WATERFALL_ROW_10MS_DEFAULT / 2
+                                     + (steps - 16) * (WATERFALL_ROW_10MS_DEFAULT / 2) / 112);
         if (interval < WATERFALL_ROW_10MS_DEFAULT / 2)
             interval = WATERFALL_ROW_10MS_DEFAULT / 2;
         if (interval > WATERFALL_ROW_10MS_DEFAULT * 2)
@@ -2184,39 +2204,51 @@ static bool HandleUserInput()
         kbd.counter = 0;
     }
 
-    // Spectrum MENU key handling:
+    // Spectrum long-press keys (MENU, SIDE1, SIDE2):
     // - short press => action on release
-    // - long press  => one-shot at counter==16
+    // - long press  => one-shot at counter==16 (MENU only; SIDE1/SIDE2 holds
+    //                  are swallowed so they cannot auto-repeat)
     if (currentState == SPECTRUM)
     {
-        if (kbd.current == KEY_INVALID && kbd.prev == KEY_MENU)
+        const int prevIdx = LongPressIndex(kbd.prev);
+        if (kbd.current == KEY_INVALID && prevIdx >= 0)
         {
-            if (menuKeyPendingShort && !menuKeyLongHandled)
-                OnKeyDown(KEY_MENU);
-            menuKeyPendingShort = false;
-            menuKeyLongHandled = false;
+            if (lpState[prevIdx].shortPending && !lpState[prevIdx].longHandled)
+            {
+                if (kbd.prev == KEY_SIDE2)
+                    OnKeyDownCommon(kbd.prev);   // ToggleBacklight lives there
+                else
+                    OnKeyDown(kbd.prev);
+            }
+            lpState[prevIdx].shortPending = false;
+            lpState[prevIdx].longHandled = false;
         }
-        else if (kbd.current != KEY_MENU && kbd.prev != KEY_MENU)
+        for (int i = 0; i < LP_COUNT; i++)
         {
-            menuKeyPendingShort = false;
-            menuKeyLongHandled = false;
+            if (kbd.current != lpKeys[i] && kbd.prev != lpKeys[i])
+            {
+                lpState[i].shortPending = false;
+                lpState[i].longHandled = false;
+            }
         }
     }
 
     if (kbd.counter == 3 || kbd.counter == 16)
     {
-        if (currentState == SPECTRUM && kbd.current == KEY_MENU)
+        const int idx = LongPressIndex(kbd.current);
+        if (currentState == SPECTRUM && idx >= 0)
         {
             if (kbd.counter == 3)
             {
-                menuKeyPendingShort = true;
-                menuKeyLongHandled = false;
+                lpState[idx].shortPending = true;
+                lpState[idx].longHandled = false;
             }
-            else if (kbd.counter == 16 && !menuKeyLongHandled)
+            else if (kbd.counter == 16 && !lpState[idx].longHandled)
             {
-                menuKeyPendingShort = false;
-                menuKeyLongHandled = true;
-                ResetSpectrumToDefaults();
+                lpState[idx].shortPending = false;
+                lpState[idx].longHandled = true;
+                if (kbd.current == KEY_MENU)
+                    ResetSpectrumToDefaults();
             }
             return true;
         }
@@ -2316,6 +2348,12 @@ static void FinalizeCompletedSweep()
             newMax = 10;
         settings.dbMax = newMax;
     }
+
+    // Keep the waterfall dB window in sync with the auto-adjusted dbMax.
+    // dbmToLevel() reads the range cached by WATERFALL_SetDbRange, not
+    // settings.dbMax, so without this the waterfall's dB->gray mapping lags
+    // the auto-adjusted dbMax by up to one sweep.
+    WATERFALL_SetDbRange(settings.dbMin, settings.dbMax);
 
     // Next full sweep starts from the opposite side to avoid directional bias.
     scanStartFromLeft = !scanStartFromLeft;

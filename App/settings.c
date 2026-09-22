@@ -659,8 +659,13 @@ void SETTINGS_LoadCalibration(void)
         batteryCalibrationChanged = true;
     }
 
-    if (batteryCalibrationChanged)
-        SETTINGS_SaveBatteryCalibration(gBatteryCalibration);
+    // The V1->V2 migration and the range clamps above stay in RAM only. The 12
+    // bytes at BATTERY_CALIB_FLASH_ADDR sit in the calibration region, which is
+    // not rewritten by flashing a different firmware, and F4HWN-based firmware
+    // reads the same bytes in the V1 format: writing the converted values back
+    // made F4HWN show the battery ~10 % low (V1 slot 3 is the raw ADC at 7.6 V,
+    // V2 stores it at 8.4 V) until the calibration was restored by hand.
+    (void)batteryCalibrationChanged;
 
     gBatteryCalibration[5] = 2300;
 

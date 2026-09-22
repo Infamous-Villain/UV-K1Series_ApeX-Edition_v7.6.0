@@ -150,6 +150,24 @@ target_link_options(${EXE_NAME} PRIVATE -Wl,--no-warn-rwx-segment)
 #  Post build processing
 #
 
+# The multiboot restore stub executes while application flash is unavailable.
+# Reject an overlay build if the linked stub branches outside its RAM section or
+# if its input section refers to any external code/data (ported from F4HWN).
+if(ENABLE_FEAT_F4HWN_MULTIBOOT_OVERLAY)
+    add_custom_command(
+        TARGET ${EXE_NAME}
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+                "-DOBJDUMP=${CMAKE_OBJDUMP}"
+                "-DELF=$<TARGET_FILE:${EXE_NAME}>"
+                "-DMAP=${CMAKE_CURRENT_BINARY_DIR}/${FIRMWARE_PACKAGE_NAME}.map"
+                "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+                -P "${CMAKE_SOURCE_DIR}/cmake/check_mb_ramfunc.cmake"
+        COMMENT "Checking multiboot RAM stub isolation"
+        VERBATIM
+    )
+endif()
+
 # Generate .bin and .hex files in the build directory using the package filename
 add_custom_command(
     TARGET ${EXE_NAME}

@@ -39,4 +39,23 @@ void PY25Q16_FlushPendingWrite(void);   // write back the dirty sector, if any
 bool PY25Q16_HasPendingWrite(void);     // true if a flush is pending
 bool PY25Q16_LastFlushVerified(void);   // read-back verify result of last flush
 
+// Like PY25Q16_ReadBuffer, but waits for the flash to be idle (WIP=0) first.
+void PY25Q16_ReadBufferSafe(uint32_t Address, void *pBuffer, uint32_t Size);
+
+// Drop the internal sector cache (after raw flash ops behind the driver's back,
+// e.g. multiboot slot/bank operations). Does NOT flush a pending deferred
+// write - it may run with IRQs masked - so call PY25Q16_FlushPendingWrite()
+// first while IRQs/DMA are still available.
+void PY25Q16_InvalidateCache(void);
+
+#ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
+// Multiboot per-bank config banking, ported from F4HWN (armel, 3a50e212).
+// Accesses BELOW PY25Q16_BANK_SHARED_FROM are shifted into the active bank;
+// calibration, boot logo, firmware slots and the multiboot marker live at or
+// above that boundary and stay shared by every bank. Set once at boot from
+//   PY25Q16_SetBankBase(MB_BankBase(MB_BootResolveState()));
+#define PY25Q16_BANK_SHARED_FROM  0x00010000u   /* calibration boundary */
+void PY25Q16_SetBankBase(uint32_t Base);
+#endif
+
 #endif

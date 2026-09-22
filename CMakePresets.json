@@ -70,6 +70,8 @@
                 "ENABLE_FEAT_N7SIX_RXTX_LOG": true,
                 "ENABLE_FEAT_N7SIX_RXTX_LOG_K5VIEWER": true,
                 "ENABLE_FEAT_N7SIX_K5VIEWER": true,
+                "ENABLE_FEAT_F4HWN_MULTIBOOT": true,
+                "ENABLE_FEAT_F4HWN_MULTIBOOT_OVERLAY": true,
                 "ENABLE_FEAT_N7SIX_SCAN_PROGRESS": true,
                 "ENABLE_FEAT_N7SIX_SCAN_FASTER": true,
                 "ENABLE_FEAT_N7SIX_SCAN_RSSI": true,

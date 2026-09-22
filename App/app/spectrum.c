@@ -651,7 +651,11 @@ static void ToggleRX(bool on)
         // Reset waterfall timer for fast first-row push.
         wfLastTick = gGlobalSysTickCounter - (WATERFALL_GetRowInterval() - 3);
 
-        UI_MAIN_SetRxLed(true);
+        // The spectrum has no VFO A/B: always GREEN. UI_MAIN_SetRxLed() picks
+        // the colour from gEeprom.RX_VFO (the main-screen VFO), so here it lit
+        // YELLOW whenever the radio had last been on VFO B before entering.
+        BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, false);
+        BK4819_ToggleGpioOut(BK4819_GPIO6_PIN2_GREEN, true);
 
         // Centralized audio path: DAC→settle→unmute
         RADIO_SetAudioPath(true);

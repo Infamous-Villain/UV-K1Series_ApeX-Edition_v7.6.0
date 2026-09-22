@@ -170,7 +170,7 @@ enum
     MENU_SET_SAV,
 #endif
 #ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
-    MENU_SET_CFG,     // load another multiboot settings bank (reboots)
+    MENU_SET_CFG,     // copy another multiboot settings bank into this one (reboots)
 #endif
 };
 

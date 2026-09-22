@@ -2077,6 +2077,36 @@ Skip:
     gPttWasReleased = true;
 }
 
+#ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
+// SetCfg: COPY another multiboot settings bank into the bank in use. F4HWN's
+// SetCfg instead redirects the running firmware to the other bank, so every
+// later change is written into the other firmware's settings. Here the source
+// bank is only read, and the multiboot marker is not touched.
+//
+// Only the per-bank region (below PY25Q16_BANK_SHARED_FROM: channels, names,
+// VFOs, settings) is copied; calibration and the logo are shared anyway.
+// Banks are addressed by switching the driver's bank base; its sector cache is
+// keyed by physical address, so this is coherent with deferred writes, and
+// PY25Q16_WriteBuffer only erases a sector whose content really changes.
+// A power loss mid-copy leaves this bank half-copied; the source is intact and
+// the copy can simply be repeated.
+static void MENU_CopySettingsBank(uint8_t srcBank)
+{
+    const uint32_t dstBase = MB_BankBase(MB_GetActiveBank());
+    const uint32_t srcBase = MB_BankBase(srcBank);
+    uint8_t buf[128];
+
+    for (uint32_t addr = 0; addr < PY25Q16_BANK_SHARED_FROM; addr += sizeof(buf))
+    {
+        PY25Q16_SetBankBase(srcBase);
+        PY25Q16_ReadBuffer(addr, buf, sizeof(buf));
+        PY25Q16_SetBankBase(dstBase);
+        PY25Q16_WriteBuffer(addr, buf, sizeof(buf), false);
+    }
+    PY25Q16_FlushPendingWrite();   // write back the last deferred sector
+}
+#endif
+
 static void MENU_Key_MENU(const bool bKeyPressed, const bool bKeyHeld)
 {
     if (!bKeyPressed || (bKeyHeld && (!MENU_IsEditingName() || gAskForConfirmation)))
@@ -2291,10 +2321,8 @@ static void MENU_Key_MENU(const bool bKeyPressed, const bool bKeyHeld)
 #ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
                     else if (m == MENU_SET_CFG)
                     {
-                        // Bind the chosen settings bank, then reboot so it is
-                        // mapped before any settings are read (ported from
-                        // F4HWN). Confirming the current bank is a no-op: do
-                        // not wear a marker sector or reboot.
+                        // Copying the bank already in use is a no-op: no
+                        // flash wear, no reboot.
                         if (gSubMenuSelection == MB_GetActiveBank())
                         {
                             gFlagAcceptSetting  = false;
@@ -2304,23 +2332,9 @@ static void MENU_Key_MENU(const bool bKeyPressed, const bool bKeyHeld)
                             return;
                         }
 
-#ifdef ENABLE_DEFERRED_FLASH_WRITES
-                        // Write back pending settings of the CURRENT bank now:
-                        // the marker write below switches SPI2 to polled mode
-                        // and a reset follows, so a dirty sector would be lost.
-                        PY25Q16_FlushPendingWrite();
-#endif
-                        const uint8_t err = MB_SetActiveBank(gSubMenuSelection);
-                        if (err != MB_OK)
-                        {
-                            // The previous redundant marker stays authoritative.
-                            UI_MultibootShowConfigError(err);
-                            gAskForConfirmation   = 0;
-                            gRequestDisplayScreen = DISPLAY_MENU;
-                            SCANNER_Stop();
-                            return;
-                        }
-
+                        // "WAIT!" is on screen (UI_DisplayMenu above). Copy,
+                        // then reboot so every setting is re-read from it.
+                        MENU_CopySettingsBank(gSubMenuSelection);
                         NVIC_SystemReset();
                     }
 #endif

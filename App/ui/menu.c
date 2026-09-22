@@ -362,7 +362,7 @@ const t_menu_item MenuList[] =
 #endif
 #endif
 #ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
-    {"SetCfg",      MENU_SET_CFG       }, // load another settings bank (reboots)
+    {"CpyCfg",      MENU_SET_CFG       }, // copy another settings bank into this one (reboots)
 #endif
 #ifdef ENABLE_FEAT_N7SIX
     {"SysInf",      MENU_VOL           }, // system info - LAST visible item

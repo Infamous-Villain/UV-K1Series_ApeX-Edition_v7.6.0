@@ -167,7 +167,10 @@ enum
     MENU_MLONG,
     MENU_BATTYP,
 #if defined(ENABLE_FEAT_N7SIX) && defined(ENABLE_FEAT_N7SIX_LOGO_SAV)
-    MENU_SET_SAV
+    MENU_SET_SAV,
+#endif
+#ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
+    MENU_SET_CFG,     // copy another multiboot settings bank into this one (reboots)
 #endif
 };
 

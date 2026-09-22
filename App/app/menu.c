@@ -31,6 +31,10 @@
 #endif
 #include "driver/gpio.h"
 #include "driver/keyboard.h"
+#ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
+    #include "driver/mb_flash.h"
+    #include "ui/multiboot.h"
+#endif
 #include "frequencies.h"
 #include "helper/battery.h"
 #include "misc.h"
@@ -218,6 +222,13 @@ int MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax)
             //*pMin = 0;
             *pMax = ARRAY_SIZE(gSubMenu_RESET) - 1;
             break;
+
+#ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
+        case MENU_SET_CFG:
+            //*pMin = 0;
+            *pMax = MB_BANK_COUNT - 1;
+            break;
+#endif
 
         case MENU_COMPAND:
         case MENU_ABR_ON_TX_RX:
@@ -1140,6 +1151,12 @@ void MENU_ShowCurrentSetting(void)
             gSubMenuSelection = 0;
             break;
 
+#ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
+        case MENU_SET_CFG:
+            gSubMenuSelection = MB_GetActiveBank();
+            break;
+#endif
+
         case MENU_R_DCS:
         case MENU_R_CTCS:
         {
@@ -2060,6 +2077,36 @@ Skip:
     gPttWasReleased = true;
 }
 
+#ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
+// SetCfg: COPY another multiboot settings bank into the bank in use. F4HWN's
+// SetCfg instead redirects the running firmware to the other bank, so every
+// later change is written into the other firmware's settings. Here the source
+// bank is only read, and the multiboot marker is not touched.
+//
+// Only the per-bank region (below PY25Q16_BANK_SHARED_FROM: channels, names,
+// VFOs, settings) is copied; calibration and the logo are shared anyway.
+// Banks are addressed by switching the driver's bank base; its sector cache is
+// keyed by physical address, so this is coherent with deferred writes, and
+// PY25Q16_WriteBuffer only erases a sector whose content really changes.
+// A power loss mid-copy leaves this bank half-copied; the source is intact and
+// the copy can simply be repeated.
+static void MENU_CopySettingsBank(uint8_t srcBank)
+{
+    const uint32_t dstBase = MB_BankBase(MB_GetActiveBank());
+    const uint32_t srcBase = MB_BankBase(srcBank);
+    uint8_t buf[128];
+
+    for (uint32_t addr = 0; addr < PY25Q16_BANK_SHARED_FROM; addr += sizeof(buf))
+    {
+        PY25Q16_SetBankBase(srcBase);
+        PY25Q16_ReadBuffer(addr, buf, sizeof(buf));
+        PY25Q16_SetBankBase(dstBase);
+        PY25Q16_WriteBuffer(addr, buf, sizeof(buf), false);
+    }
+    PY25Q16_FlushPendingWrite();   // write back the last deferred sector
+}
+#endif
+
 static void MENU_Key_MENU(const bool bKeyPressed, const bool bKeyHeld)
 {
     if (!bKeyPressed || (bKeyHeld && (!MENU_IsEditingName() || gAskForConfirmation)))
@@ -2240,6 +2287,9 @@ static void MENU_Key_MENU(const bool bKeyPressed, const bool bKeyHeld)
         if (m == MENU_RESET  ||
             m == MENU_MEM_CH ||
             m == MENU_DEL_CH ||
+#ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
+            m == MENU_SET_CFG ||
+#endif
             m == MENU_MEM_NAME)
         {
             switch (gAskForConfirmation)
@@ -2268,6 +2318,26 @@ static void MENU_Key_MENU(const bool bKeyPressed, const bool bKeyHeld)
 #endif
                         NVIC_SystemReset();
                     }
+#ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
+                    else if (m == MENU_SET_CFG)
+                    {
+                        // Copying the bank already in use is a no-op: no
+                        // flash wear, no reboot.
+                        if (gSubMenuSelection == MB_GetActiveBank())
+                        {
+                            gFlagAcceptSetting  = false;
+                            gIsInSubMenu        = false;
+                            gAskForConfirmation = 0;
+                            SCANNER_Stop();
+                            return;
+                        }
+
+                        // "WAIT!" is on screen (UI_DisplayMenu above). Copy,
+                        // then reboot so every setting is re-read from it.
+                        MENU_CopySettingsBank(gSubMenuSelection);
+                        NVIC_SystemReset();
+                    }
+#endif
 
                     gFlagAcceptSetting  = true;
                     gIsInSubMenu        = false;

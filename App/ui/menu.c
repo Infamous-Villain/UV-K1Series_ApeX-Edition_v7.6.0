@@ -361,8 +361,11 @@ const t_menu_item MenuList[] =
     {"SetSav",      MENU_SET_SAV       },
 #endif
 #endif
+#ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
+    {"CpyCfg",      MENU_SET_CFG       }, // copy another settings bank into this one (reboots)
+#endif
 #ifdef ENABLE_FEAT_N7SIX
-    {"SysInf",      MENU_VOL           }, // system info - LAST visible item (position 72)
+    {"SysInf",      MENU_VOL           }, // system info - LAST visible item
 #endif
 
 // Hidden menu items from here on - only accessible when pressing both
@@ -1550,6 +1553,14 @@ void UI_DisplayMenu(void)
             strcpy(String, gSubMenu_RESET[gSubMenuSelection]);
             break;
 
+#ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
+        case MENU_SET_CFG:
+            strcpy(String, "CFG M");         // bank 0 = the Main slot's settings
+            if (gSubMenuSelection != 0)
+                String[4] = (char)('0' + gSubMenuSelection);
+            break;
+#endif
+
         case MENU_F_LOCK:
 #ifdef ENABLE_FEAT_N7SIX
             if(!gIsInSubMenu && gUnlockAllTxConfCnt>0 && gUnlockAllTxConfCnt<3)
@@ -1936,6 +1947,9 @@ void UI_DisplayMenu(void)
     if ((m == MENU_RESET    ||
          m == MENU_MEM_CH   ||
          m == MENU_MEM_NAME ||
+#ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
+         m == MENU_SET_CFG  ||
+#endif
          m == MENU_DEL_CH) && gAskForConfirmation)
     {   // display confirmation
         char *pPrintStr = (gAskForConfirmation == 1) ? "SURE?" : "WAIT!";

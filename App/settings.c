@@ -659,8 +659,12 @@ void SETTINGS_LoadCalibration(void)
         batteryCalibrationChanged = true;
     }
 
-    if (batteryCalibrationChanged)
-        SETTINGS_SaveBatteryCalibration(gBatteryCalibration);
+    // The V1->V2 migration and the range clamps above stay in RAM only. The 12
+    // bytes at BATTERY_CALIB_FLASH_ADDR are in the calibration region shared by
+    // every multiboot slot (at/above PY25Q16_BANK_SHARED_FROM), and F4HWN reads
+    // the same bytes in the V1 format: writing the converted values back made
+    // F4HWN show the battery ~10 % low after running ApeX.
+    (void)batteryCalibrationChanged;
 
     gBatteryCalibration[5] = 2300;
 

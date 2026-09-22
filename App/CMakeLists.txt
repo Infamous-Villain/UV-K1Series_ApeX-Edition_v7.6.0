@@ -242,6 +242,29 @@ enable_feature(ENABLE_FEAT_N7SIX_RXTX_LOG
 enable_feature(ENABLE_FEAT_N7SIX_RXTX_LOG_K5VIEWER)
 enable_feature(ENABLE_FEAT_N7SIX_K5VIEWER)
 
+# ---- MULTIBOOT (ported from F4HWN, armel 3a50e212) ----
+# Boot-time firmware selector (hold MENU at power-on) plus per-slot settings
+# banks. Slot provisioning (UART upload, slot/bank erase) stays in F4HWN: this
+# port only switches between slots and keeps each firmware's settings apart.
+option(ENABLE_FEAT_F4HWN_MULTIBOOT "Multiboot firmware selector and per-slot settings banks" OFF)
+option(ENABLE_FEAT_F4HWN_MULTIBOOT_OVERLAY "Run the multiboot restore stub from the PY25Q16 sector cache (saves RAM)" OFF)
+enable_feature(ENABLE_FEAT_F4HWN_MULTIBOOT
+    driver/mb_flash.c
+    ui/multiboot.c
+)
+enable_feature(ENABLE_FEAT_F4HWN_MULTIBOOT_OVERLAY)
+if(ENABLE_FEAT_F4HWN_MULTIBOOT_OVERLAY AND NOT ENABLE_FEAT_F4HWN_MULTIBOOT)
+    message(FATAL_ERROR "ENABLE_FEAT_F4HWN_MULTIBOOT_OVERLAY requires ENABLE_FEAT_F4HWN_MULTIBOOT.")
+endif()
+if(ENABLE_FEAT_F4HWN_MULTIBOOT)
+    # The restore stub runs while internal flash is unavailable. LTO could
+    # inline, clone or substitute library calls into it; build this one object
+    # without LTO, as upstream's post-build isolation gate requires.
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/driver/mb_flash.c
+        DIRECTORY ${CMAKE_SOURCE_DIR}
+        PROPERTIES COMPILE_OPTIONS "-fno-lto")
+endif()
+
 # ---- DEBUGGING ----
 
 enable_feature(ENABLE_AGC_SHOW_DATA)

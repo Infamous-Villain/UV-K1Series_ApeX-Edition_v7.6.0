@@ -39,13 +39,45 @@
 #define PAGE_SIZE 0x100
 
 static uint32_t SectorCacheAddr = 0x1000000;
+#ifdef ENABLE_FEAT_F4HWN_MULTIBOOT_OVERLAY
+// The multiboot restore-only RAM stub is copied over this cache immediately
+// before it erases internal flash; a reset always follows. A pending deferred
+// write is flushed before the selector starts (BOOT_ProcessMode), because the
+// restore path itself runs with IRQs masked and cannot flush.
+static uint8_t SectorCache[SECTOR_SIZE]
+    __attribute__((section(".bss.mb_workspace"), aligned(4), used));
+#else
 static uint8_t SectorCache[SECTOR_SIZE];
+#endif
 #ifdef ENABLE_DEFERRED_FLASH_WRITES
 static bool SectorDirty;             // SectorCache holds un-flushed data
 static bool LastFlushVerified = true;
 #endif
 static uint8_t BlackHole[4] __attribute__((aligned(4)));
 static volatile bool TC_Flag;
+
+#ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
+// Active settings-bank base (see py25q16.h). 0 = bank 0, identity mapping.
+static uint32_t BankBase = 0;
+
+void PY25Q16_SetBankBase(uint32_t Base)
+{
+    BankBase = Base;
+}
+
+// Redirect config-region accesses (addr < boundary) into the active bank.
+// BankBase is sector-aligned, so callers' alignment is preserved. Everything
+// that keeps a flash address internally (SectorCacheAddr) holds the MAPPED one.
+static inline uint32_t BankMap(uint32_t Address)
+{
+    return (Address < PY25Q16_BANK_SHARED_FROM) ? (Address + BankBase) : Address;
+}
+#else
+static inline uint32_t BankMap(uint32_t Address)
+{
+    return Address;
+}
+#endif
 
 static inline void CS_Assert()
 {
@@ -229,8 +261,9 @@ void PY25Q16_Init()
     SPI_Init();
 }
 
-// Plain SPI read, without the deferred-write coherency overlay. The read-back
-// verify in PY25Q16_FlushPendingWrite() must see what the flash really holds.
+// Plain SPI read at an already-mapped address, without the deferred-write
+// coherency overlay. Used internally wherever the address is in mapped space
+// or the caller must see what the flash really holds (read-back verify).
 static void ReadBufferRaw(uint32_t Address, void *pBuffer, uint32_t Size)
 {
     CS_Assert();
@@ -258,6 +291,7 @@ static void ReadBufferRaw(uint32_t Address, void *pBuffer, uint32_t Size)
 
 void PY25Q16_ReadBuffer(uint32_t Address, void *pBuffer, uint32_t Size)
 {
+    Address = BankMap(Address);
     ReadBufferRaw(Address, pBuffer, Size);
 
 #ifdef ENABLE_DEFERRED_FLASH_WRITES
@@ -282,8 +316,19 @@ void PY25Q16_ReadBuffer(uint32_t Address, void *pBuffer, uint32_t Size)
 #endif
 }
 
+// Like PY25Q16_ReadBuffer, but waits for the flash to be idle (WIP=0) first:
+// a read issued while the chip is still busy from a prior program/erase never
+// returns the expected data.
+void PY25Q16_ReadBufferSafe(uint32_t Address, void *pBuffer, uint32_t Size)
+{
+    WaitWIP();
+    PY25Q16_ReadBuffer(Address, pBuffer, Size);
+}
+
 void PY25Q16_WriteBuffer(uint32_t Address, const void *pBuffer, uint32_t Size, bool Append)
 {
+    Address = BankMap(Address);   // map once; internal reads use ReadBufferRaw
+
 #ifdef DEBUG
     printf("spi flash write: %06x %ld %d\n", Address, Size, Append);
 #endif
@@ -317,7 +362,7 @@ void PY25Q16_WriteBuffer(uint32_t Address, const void *pBuffer, uint32_t Size, b
                 PY25Q16_FlushPendingWrite();
             }
 #endif
-            PY25Q16_ReadBuffer(SecAddr, SectorCache, SECTOR_SIZE);
+            ReadBufferRaw(SecAddr, SectorCache, SECTOR_SIZE);   // SecAddr is mapped
             SectorCacheAddr = SecAddr;
         }
 
@@ -385,6 +430,7 @@ void PY25Q16_WriteBuffer(uint32_t Address, const void *pBuffer, uint32_t Size, b
 
 void PY25Q16_SectorErase(uint32_t Address)
 {
+    Address = BankMap(Address);
     Address -= (Address % SECTOR_SIZE);
 #ifdef ENABLE_DEFERRED_FLASH_WRITES
     // Don't lose unrelated pending data when erasing a different sector.
@@ -470,6 +516,20 @@ bool PY25Q16_LastFlushVerified(void)
     return true;
 }
 #endif
+
+// Must NOT flush: multiboot calls this with IRQs masked and SPI2 DMA stopped
+// (MB_RestoreSlot), where the DMA-driven write path cannot run. A pending
+// deferred write is therefore flushed by the caller BEFORE multiboot starts
+// (BOOT_ProcessMode flushes before the selector), and is dropped here only if
+// something wrote in between.
+void PY25Q16_InvalidateCache(void)
+{
+#ifdef ENABLE_DEFERRED_FLASH_WRITES
+    SectorDirty = false;
+#endif
+    // Same "no sector cached" sentinel as the initial value.
+    SectorCacheAddr = 0x1000000;
+}
 
 static inline void WriteAddr(uint32_t Addr)
 {

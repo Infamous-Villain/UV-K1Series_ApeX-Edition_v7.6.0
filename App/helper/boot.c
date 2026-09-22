@@ -29,12 +29,42 @@
 #include "settings.h"
 #include "ui/menu.h"
 #include "ui/ui.h"
+#ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
+    #include "driver/py25q16.h"
+    #include "ui/multiboot.h"
+#endif
 
 BOOT_Mode_t BOOT_GetMode(void)
 {
     unsigned int i;
     KEY_Code_t   Keys[2];
 
+#ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
+    bool         PttPressed[2];
+
+    /* Poll the keypad even without PTT: holding MENU alone enters multiboot
+     * (ported from F4HWN, armel 3a50e212). Two samples, same debounce rule as
+     * the legacy boot modes. */
+    for (i = 0; i < 2; i++)
+    {
+        PttPressed[i] = GPIO_IsPttPressed();
+        Keys[i] = KEYBOARD_Poll();
+        SYSTEM_DelayMs(20);
+    }
+
+    if (!PttPressed[0] && !PttPressed[1] &&
+        Keys[0] == KEY_MENU && Keys[1] == KEY_MENU)
+    {
+        gKeyReading0 = Keys[0];
+        gKeyReading1 = Keys[0];
+        gDebounceCounter = 2;
+        return BOOT_MODE_MULTIBOOT;
+    }
+
+    /* All historical special modes still require PTT for both samples. */
+    if (!PttPressed[0] || !PttPressed[1])
+        return BOOT_MODE_NORMAL;
+#else
     for (i = 0; i < 2; i++)
     {
         if (!GPIO_IsPttPressed())
@@ -42,6 +72,7 @@ BOOT_Mode_t BOOT_GetMode(void)
         Keys[i] = KEYBOARD_Poll();
         SYSTEM_DelayMs(20);
     }
+#endif
 
     #ifdef ENABLE_FEAT_N7SIX_RESCUE_OPS
     if (Keys[0] == (10 + gEeprom.SET_KEY))
@@ -122,6 +153,18 @@ void BOOT_ProcessMode(BOOT_Mode_t Mode)
             #endif 
 
             display = DISPLAY_AIRCOPY;
+        }
+    #endif
+
+    #ifdef ENABLE_FEAT_F4HWN_MULTIBOOT
+        if (Mode == BOOT_MODE_MULTIBOOT)
+        {
+            // Boot-time settings writes (e.g. SETTINGS_WriteBuildOptions) may
+            // sit in the deferred-write cache. Write them back now, while IRQs
+            // and DMA still work: the restore path masks IRQs and reuses the
+            // cache as the reflash stub's RAM (PY25Q16_InvalidateCache).
+            PY25Q16_FlushPendingWrite();
+            UI_MultibootSelector();
         }
     #endif
 

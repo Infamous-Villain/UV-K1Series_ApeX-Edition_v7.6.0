@@ -229,7 +229,9 @@ void PY25Q16_Init()
     SPI_Init();
 }
 
-void PY25Q16_ReadBuffer(uint32_t Address, void *pBuffer, uint32_t Size)
+// Plain SPI read, without the deferred-write coherency overlay. The read-back
+// verify in PY25Q16_FlushPendingWrite() must see what the flash really holds.
+static void ReadBufferRaw(uint32_t Address, void *pBuffer, uint32_t Size)
 {
     CS_Assert();
 
@@ -252,6 +254,11 @@ void PY25Q16_ReadBuffer(uint32_t Address, void *pBuffer, uint32_t Size)
     }
 
     CS_Release();
+}
+
+void PY25Q16_ReadBuffer(uint32_t Address, void *pBuffer, uint32_t Size)
+{
+    ReadBufferRaw(Address, pBuffer, Size);
 
 #ifdef ENABLE_DEFERRED_FLASH_WRITES
     // Coherency: if a deferred (not yet flushed) write modified the sector
@@ -419,7 +426,10 @@ void PY25Q16_FlushPendingWrite(void)
 
         for (uint32_t Off = 0; Off < SECTOR_SIZE; Off += sizeof(VerifyBuf))
         {
-            PY25Q16_ReadBuffer(SectorCacheAddr + Off, VerifyBuf, sizeof(VerifyBuf));
+            // Raw read: the coherent PY25Q16_ReadBuffer() would serve this
+            // range from SectorCache while SectorDirty is still set, so the
+            // verify compared the cache with itself and could never fail.
+            ReadBufferRaw(SectorCacheAddr + Off, VerifyBuf, sizeof(VerifyBuf));
             if (memcmp(VerifyBuf, SectorCache + Off, sizeof(VerifyBuf)) != 0)
             {
                 ok = false;
